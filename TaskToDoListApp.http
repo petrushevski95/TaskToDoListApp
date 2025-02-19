@@ -1,0 +1,6 @@
+@TaskToDoListApp_HostAddress = http://localhost:5173
+
+GET {{TaskToDoListApp_HostAddress}}/taskToDoList/
+Accept: application/json
+
+###

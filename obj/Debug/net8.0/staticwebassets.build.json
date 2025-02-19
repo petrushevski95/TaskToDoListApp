@@ -1,0 +1,12 @@
+{
+  "Version": 1,
+  "Hash": "at1pscTNF1c8G5NvxBJ5l3DwEL2Dsrmi5XEIIvPLMaA=",
+  "Source": "TaskToDoListApp",
+  "BasePath": "_content/TaskToDoListApp",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": [],
+  "Endpoints": []
+}
