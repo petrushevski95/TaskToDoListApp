@@ -5,7 +5,8 @@ namespace TaskToDoListApp.services.user
 {
     public interface IUserService
     {
-        Task<AuthResponseDto> RegisterUserAsync(UserRegisterDto userDto);
-        Task<AuthResponseDto> LoginUserAsync(UserLoginDto userDto);
+        Task<UserLoginRegisterDtoResponse> RegisterUserAsync(UserRegisteDtoRequest userDto);
+        Task<UserLoginRegisterDtoResponse> LoginUserAsync(UserLoginDtoRequest userDto);
+        Task<UserUpdateDtoResponse> UpdateUserAsync(int userId, UserUpdateDtoRequest request); // Update return type here
     }
 }

@@ -2,16 +2,17 @@
 using Microsoft.AspNetCore.Authorization;
 using TaskToDoListApp.services.user;
 using TaskToDoListApp.DTOs.User.Request;
+using System.Security.Claims;
 
 namespace TaskToDoListApp.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class AuthController : ControllerBase
+    public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
 
-        public AuthController(IUserService userService)
+        public UserController(IUserService userService)
         {
             _userService = userService;
         }
@@ -20,7 +21,7 @@ namespace TaskToDoListApp.Controllers
         /// Registers a new user.
         /// </summary>
         [HttpPost("register")]
-        public async Task<IActionResult> Register(UserRegisterDto userDto)
+        public async Task<IActionResult> Register(UserRegisteDtoRequest userDto)
         {
             var result = await _userService.RegisterUserAsync(userDto);
 
@@ -38,11 +39,36 @@ namespace TaskToDoListApp.Controllers
         }
 
         /// <summary>
+        /// Update user details.
+        /// </summary>
+        [Authorize] // Requires authentication
+        [HttpPut("update/{userId}")]
+        public async Task<IActionResult> UpdateUser(int userId, [FromBody] UserUpdateDtoRequest request)
+        {
+            // Get the logged-in user's ID
+            var loggedInUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            // Allow user to update only their own data unless they are Admin
+            if (loggedInUserId != userId && !User.IsInRole("Admin"))
+            {
+                return Forbid(); // Forbidden if not the user or an admin
+            }
+
+            var result = await _userService.UpdateUserAsync(userId, request);
+            if (!result.Success)
+            {
+                return BadRequest(result);
+            }
+
+            return Ok(result);
+        }
+
+        /// <summary>
         /// Logs in a user and returns a JWT token.
         /// </summary>
         [AllowAnonymous] // Ensure this is present
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] UserLoginDto userDto)
+        public async Task<IActionResult> Login([FromBody] UserLoginDtoRequest userDto)
         {
             if (userDto == null)
                 return BadRequest(new { message = "Invalid request body." });
@@ -53,7 +79,5 @@ namespace TaskToDoListApp.Controllers
 
             return Ok(result);
         }
-
-
     }
 }
