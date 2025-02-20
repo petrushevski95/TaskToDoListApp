@@ -3,8 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using TaskToDoListApp.Data;
-using TaskToDoListApp.services.user;
+using TaskToDoListApp.Services.Admin;
 using TaskToDoListApp.Services.Task;
+using TaskToDoListApp.services.user;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,7 +29,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// Configure Authorization (with roles)
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
+});
 
 // Database Context (Using SQLite)
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -37,8 +42,16 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Register Services
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 
 var app = builder.Build();
+
+// Seed roles if not present
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    DbSeeder.SeedRoles(context);
+}
 
 if (app.Environment.IsDevelopment())
 {

@@ -2,13 +2,13 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.IdentityModel.Tokens;
-using TaskToDoListApp.Models;
 using TaskToDoListApp.Data;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using TaskToDoListApp.DTOs.User.Request;
 using TaskToDoListApp.DTOs.User.Response;
+using TaskToDoListApp.Models;
 
 
 namespace TaskToDoListApp.services.user
@@ -17,61 +17,121 @@ namespace TaskToDoListApp.services.user
     {
         private readonly AppDbContext _context;
         private readonly IConfiguration _configuration;
+        private readonly ILogger<UserService> _logger;
 
-        public UserService(AppDbContext context, IConfiguration configuration)
+        public UserService(AppDbContext context, IConfiguration configuration, ILogger<UserService> logger)
         {
             _context = context;
             _configuration = configuration;
+            _logger = logger;
         }
 
-        public async Task<AuthResponseDto> RegisterUserAsync(UserRegisterDto userDto)
+        public async Task<UserLoginRegisterDtoResponse> RegisterUserAsync(UserRegisteDtoRequest userDto)
         {
-            if (await _context.Users.AnyAsync(u => u.Email == userDto.Email))
-                return new AuthResponseDto { Message = "Email already in use.", Token = null };
-
-            string salt = GenerateSalt(); // Generate salt before creating user object
-            string hashedPassword = HashPassword(userDto.Password, salt);
-
-            var user = new User
+            try
             {
-                Email = userDto.Email,
-                FullName = userDto.FullName,
-                Salt = salt,
-                PasswordHash = hashedPassword
-            };
+                if (await _context.Users.AnyAsync(u => u.Email == userDto.Email))
+                    return new UserLoginRegisterDtoResponse { Message = "Email already in use.", Token = null };
 
-            _context.Users.Add(user);
+                string salt = GenerateSalt();
+                string hashedPassword = HashPassword(userDto.Password, salt);
+
+                var user = new User
+                {
+                    Email = userDto.Email,
+                    FullName = userDto.FullName,
+                    Salt = salt,
+                    PasswordHash = hashedPassword
+                };
+
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("User registered successfully: {Email}", user.Email);
+
+                return new UserLoginRegisterDtoResponse { Success = true, Message = "User registered successfully.", Token = null };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred while registering user.");
+                return new UserLoginRegisterDtoResponse { Success = false, Message = "Registration failed.", Token = null };
+            }
+        }
+
+        public async Task<UserLoginRegisterDtoResponse> LoginUserAsync(UserLoginDtoRequest userDto)
+        {
+            try
+            {
+                _logger.LogInformation("Login attempt for email: {Email}", userDto.Email);
+
+                var user = await _context.Users.SingleOrDefaultAsync(u => u.Email == userDto.Email);
+                if (user == null)
+                {
+                    _logger.LogWarning("User not found: {Email}", userDto.Email);
+                    return new UserLoginRegisterDtoResponse { Success = false, Message = "Invalid email or password.", Token = null };
+                }
+
+                // Check if the user is banned
+                if (user.IsBanned)
+                {
+                    _logger.LogWarning("User is banned: {Email}", userDto.Email);
+                    return new UserLoginRegisterDtoResponse { Success = false, Message = "Your account is banned.", Token = null };
+                }
+
+                if (!VerifyPassword(userDto.Password, user.PasswordHash, user.Salt))
+                {
+                    _logger.LogWarning("Invalid password for user: {Email}", userDto.Email);
+                    return new UserLoginRegisterDtoResponse { Success = false, Message = "Invalid email or password.", Token = null };
+                }
+
+                var token = await GenerateJwtToken(user);
+
+                _logger.LogInformation("Token generated successfully for user: {Email}", userDto.Email);
+                return new UserLoginRegisterDtoResponse
+                {
+                    Success = true,
+                    Message = "Login successful.",
+                    Token = token
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred while logging in user: {Email}", userDto.Email);
+                return new UserLoginRegisterDtoResponse { Success = false, Message = "Login failed.", Token = null };
+            }
+        }
+
+
+        public async Task<DTOs.User.Response.UserUpdateDtoResponse> UpdateUserAsync(int userId, DTOs.User.Request.UserUpdateDtoRequest request)
+        {
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+                return new DTOs.User.Response.UserUpdateDtoResponse { Success = false, Message = "User not found." };
+
+            if (!string.IsNullOrEmpty(request.FullName))
+                user.FullName = request.FullName;
+
+            if (!string.IsNullOrEmpty(request.Email))
+            {
+                bool emailExists = await _context.Users.AnyAsync(u => u.Email == request.Email && u.Id != userId);
+                if (emailExists)
+                    return new DTOs.User.Response.UserUpdateDtoResponse { Success = false, Message = "Email is already in use." };
+                user.Email = request.Email;
+            }
+
+            if (!string.IsNullOrEmpty(request.Password))
+            {
+                string salt = GenerateSalt();
+                user.Salt = salt;
+                user.PasswordHash = HashPassword(request.Password, salt);
+            }
+
             await _context.SaveChangesAsync();
 
-            return new AuthResponseDto { Message = "User registered successfully.", Token = null, DebugInfo = "User created successfully." };
+            return new DTOs.User.Response.UserUpdateDtoResponse { Success = true, Message = "User updated successfully." };
         }
 
-        public async Task<AuthResponseDto> LoginUserAsync(UserLoginDto userDto)
-        {
-            Console.WriteLine($"Login attempt for email: {userDto.Email}");
-            var user = await _context.Users.SingleOrDefaultAsync(u => u.Email == userDto.Email);
-            if (user == null)
-            {
-                Console.WriteLine("User not found");
-                return new AuthResponseDto { Success = false, Message = "Invalid email or password.", Token = null, DebugInfo = "User not found in database." };
-            }
 
-            if (!VerifyPassword(userDto.Password, user.PasswordHash, user.Salt))
-            {
-                Console.WriteLine("Password verification failed");
-                return new AuthResponseDto { Success = false, Message = "Invalid email or password.", Token = null, DebugInfo = "Password mismatch." };
-            }
-
-            var token = GenerateJwtToken(user);
-            Console.WriteLine($"Generated token: {token}");
-            return new AuthResponseDto
-            {
-                Success = true,
-                Message = "Login successful.",
-                Token = token,
-                DebugInfo = "Token successfully generated."
-            };
-        }
 
 
         private string GenerateSalt()
@@ -101,24 +161,37 @@ namespace TaskToDoListApp.services.user
             return computedHash == storedHash;
         }
 
-        private string GenerateJwtToken(User user)
+        private async Task<string> GenerateJwtToken(User user)
         {
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-            var claims = new[]
+            // Fetch user roles asynchronously
+            var roles = await _context.UserRoles
+                                      .Where(ur => ur.UserId == user.Id)
+                                      .Join(_context.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => r.RoleName)
+                                      .ToListAsync();
+
+            var claims = new List<Claim>
             {
-        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) // Use ClaimTypes.NameIdentifier here
-    };
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Email, user.Email)
+            };
+
+            foreach (var role in roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
 
             var token = new JwtSecurityToken(
                 issuer: _configuration["Jwt:Issuer"],
                 audience: _configuration["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(30),
+                expires: DateTime.UtcNow.AddHours(1),
                 signingCredentials: credentials);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+
         }
     }
 }
